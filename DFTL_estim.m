@@ -17,7 +17,7 @@ clear; close all; clc;
 % time-varying loadings.
 % It begins with dataset selection, allowing the user to choose between 
 % monthly or quarterly data, specify the training sample size, and standardize
-% the data. The processed data is then passed to the DFTLAQ function for 
+% the data. The processed data is then passed to the DFTL function for 
 % model estimation.
 % Workflow:
 %   1. Dataset selection and loading

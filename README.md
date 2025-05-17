@@ -1,5 +1,12 @@
 # Dynamic Factor Models with Time-Varying Components
 
+**Author:** Moka Kaleji • Contact: mohammadkaleji1998@gmail.com
+
+**Affiliation:** Master Thesis in Econometrics: 
+
+Advancing High-Dimensional Factor Models: Integrating Time-Varying 
+Loadings and Transition Matrix with Dynamic Factors, University of Bologna.
+
 This repository contains MATLAB implementations of three advanced dynamic factor models designed to capture evolving structures in high-dimensional time series data. These models are particularly suited for macroeconomic or financial datasets where relationships among variables change over time.
 
 The three models implemented are:

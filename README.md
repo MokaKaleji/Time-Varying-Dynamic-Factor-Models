@@ -12,8 +12,8 @@ This repository contains MATLAB implementations of three advanced dynamic factor
 The three models implemented are:
 
 1. **DFTL** – Dynamic Factor model with Time-varying Loadings
-2. **DFTLTA** – DFTL with Time-varying Autoregressive dynamics
-3. **DFTLTATQ** – DFTLTA extended with a Time-varying State Covariance Matrix
+2. **DFTLTA** – DFTL with Time-varying Transition Matrix (A)
+3. **DFTLTATQ** – DFTLTA extended with a Time-varying State Covariance Matrix (Q)
 
 Each model includes two scripts: one for estimation and one for forecasting. This README provides detailed guidance on each model’s purpose, methodology, inputs, and execution.
 
@@ -59,7 +59,7 @@ DFTL_forecasting;
 
 ---
 
-## 🔹 2. DFTLTA: DFTL with Time-varying Autoregressive Dynamics
+## 🔹 2. DFTLTA: DFTL with Time-varying Transition Matrix (A)
 
 ### Description
 

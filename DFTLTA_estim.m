@@ -2,7 +2,7 @@
 % Author: Moka Kaleji • Contact: mohammadkaleji1998@gmail.com
 % Affiliation: Master Thesis in Econometrics: 
 % Advancing High-Dimensional Factor Models: Integrating Time-Varying 
-% Loadings and Transition Matrix with Dynamic Factors.
+% Parameters with Dynamic Factors.
 % University of Bologna
 
 clear; close all; clc;
@@ -17,7 +17,7 @@ clear; close all; clc;
 % time-varying loadings, and transition matrices.
 % It begins with dataset selection, allowing the user to choose between 
 % monthly or quarterly data, specify the training sample size, and standardize
-% the data. The processed data is then passed to the DFTLAQ function for 
+% the data. The processed data is then passed to the QMLDFM_TVLA function for 
 % model estimation.
 % Workflow:
 %   1. Dataset selection and loading
@@ -144,19 +144,19 @@ x_train_norm = (x_train - mean_train) ./ std_train;
 % (e.g., number of variables, time series dynamics). R=5 assumes a moderate
 % number of factors; h=0.1 and h_A=0.1 balance smoothness and flexibility;
 % p=2 allows for lagged dynamics; max_iter=1000 and tol=1e-6 ensure convergence.
-R = 9;                                                                     % Number of factors
-h = 0.08;                                                                   % Bandwidth for LSFM
-p = 2;                                                                     % VAR lag order
+R = 6;                                                                     % Number of factors
+h = 0.2718116211;                                                                   % Bandwidth for LSFM
+p = 1;                                                                     % VAR lag order
 max_iter = 1000;                                                           % Maximum EM iterations
-tol = 1e-4;                                                                % Convergence tolerance
-h_A = 0.1;                                                                 % Bandwidth for Ahat
+tol = 1e-6;                                                                % Convergence tolerance
+h_A = 0.2718116211;                                                                 % Bandwidth for Ahat
  
 % --- Run QMLDFM_TVLA ---
 % Explanation: Call the main estimation function with the standardized 
 % training data and parameters. Outputs include common components, factors,
 % loadings, covariances, and the log-likelihood, which can be used for model
 % evaluation, forecasting, or diagnostics.
-[MKA] = QMLDFM_TVLA(x_train_norm, R, h, p, max_iter, tol, h_A);
+[MKA] = QMLDFM_TVLA(x_train_norm, R, h, p, mean_train, std_train, max_iter, tol, h_A);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Save Results for Forecasting and Further Analysis 
@@ -169,7 +169,7 @@ disp('DFTL&A estimation complete. Results saved.');
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Main Function 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
+function [MKA] = QMLDFM_TVLA(X, R, h, p, mean_train, std_train, max_iter, tol, h_A)
     % Quasi Maximum Likelihood estimation of a dynamic factor model with 
     % time-varying loadings and Ahat
     % Purpose:
@@ -260,7 +260,7 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
     [~, Fhat_initial, Lhat, Sigmahat] = lsfm(X, R, h);
     Fhat = Fhat_initial; % T x R
     Lhat = permute(Lhat, [1, 2, 3]); % N x R x T
-    Sigma_e_hat = diag(mean(diag(squeeze(mean(Sigmahat, 3)))) * ones(N, 1));
+    Sigma_e_hat = Sigmahat;
 
     % --- VAR(p) Initialization ---
     % Purpose: Initialize the time-varying VAR(p) coefficients Ahat and 
@@ -282,8 +282,28 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
             Ahat{t, lag} = AL0(:, :, lag);                                 % R x R
         end
     end
+    % Initialize Qhat using VAR(p) residuals
     Qhat = zeros(state_dim, state_dim);
-    Qhat(1:R, 1:R) = cov(Fhat_initial(p+1:end, :) - Fhat_initial(p:end-1, :));
+    % Fit VAR(p) and compute residuals
+    % Prepare lagged data
+    Y = Fhat_initial(p+1:end, :);                                          % (T-p)-by-R, dependent variable
+    qq = zeros(T-p, R*p);                                                  % Regressors
+    for lag = 1:p
+        qq(:, (lag-1)*R+1:lag*R) = Fhat_initial(p+1-lag:end-lag, :);
+    end
+                                                                           % Estimate VAR coefficients
+    A = (qq' * qq) \ (qq' * Y);                                            % R*p-by-R
+    % Compute residuals
+    residuals = Y - qq * A;                                                % (T-p)-by-R
+
+    % Compute covariance of residuals
+    Qhat(1:R, 1:R) = cov(residuals);                                       % R-by-R covariance
+
+    % Ensure positive definiteness
+    Qhat(1:R, 1:R) = (Qhat(1:R, 1:R) + Qhat(1:R, 1:R)') / 2;               % Ensure symmetry
+    [V, D] = eig(Qhat(1:R, 1:R));
+    D = max(real(diag(D)), 1e-6);                                          % Ensure positive eigenvalues
+    Qhat(1:R, 1:R) = V * diag(D) * V';                                     % Reconstruct positive definite matrix
 
     % --- Precompute Kernel Weights for Ahat ---
     % Purpose: Compute Gaussian kernel weights for smoothing time-varying 
@@ -315,6 +335,7 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
     % maximizing the expected complete-data log-likelihood. This approach 
     % handles incomplete data (latent factors) effectively in dynamic factor 
     % models.
+    decrease_count=0;
     logL_prev = -Inf;
     for iter = 1:max_iter
 
@@ -417,36 +438,25 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
             % affecting X_t. This structure aligns with the factor model’s
             % observation equation.
             Lt = squeeze(Lhat(:, :, t));                                   % N x R
-            H = [Lt, zeros(N, state_dim_aug - R)];                         % N x (R*(p+1))
+            L = [Lt, zeros(N, state_dim_aug - R)];                         % N x (R*(p+1))
 
             % --- Update ---
             % Purpose: Update the state and covariance using the observation X_t.
             % Explanation: The update step computes:
-            %   v_t = X_t - H_t * f_{t|t-1} (innovation)
-            %   S_t = H_t * P_{t|t-1} * H_t' + Sigma_e (innovation covariance)
-            %   K_t = P_{t|t-1} * H_t' * S_t^{-1} (Kalman gain)
+            %   v_t = X_t - L * f_{t|t-1} (innovation)
+            %   H = L * P_{t|t-1} * L' + Sigma_e (innovation covariance)
+            %   K_t = P_{t|t-1} * L' * S_t^{-1} (Kalman gain)
             %   f_{t|t} = f_{t|t-1} + K_t * v_t
-            %   P_{t|t} = P_{t|t-1} - K_t * H_t * P_{t|t-1}
-            % The log-likelihood is computed for t > p to avoid initial 
-            % lag effects, using Cholesky decomposition for numerical 
-            % stability in det(S_t) and S_t^{-1}.
-            y_pred = H * Fhat_pred_aug(t, :)';
+            %   P_{t|t} = P_{t|t-1} - K_t * L * P_{t|t-1}
+            y_pred = L * Fhat_pred_aug(t, :)';
             v_t = X(t, :)' - y_pred;
-            S_t = H * P_pred_aug(:, :, t) * H' + Sigma_e_hat;
-            if t > p
-                try
-                    L = chol(S_t, 'lower');
-                    log_det_S_t = 2 * sum(log(diag(L)));
-                    inv_S_v_t = L' \ (L \ v_t);
-                    logL = logL + 0.5 * (-N * log(2*pi) - log_det_S_t - ...
-                        v_t' * inv_S_v_t);
-                catch
-                    warning('S_t not positive definite at t = %d', t);
-                end
-            end
-            K = P_pred_aug(:, :, t) * H' / S_t;
+            H = L * P_pred_aug(:, :, t) * L' + Sigma_e_hat;                % Conditional variance of the Observation
+            Hinv = inv(H);
+            logL = logL + 0.5 * (-log(det(H)) - v_t' * Hinv * v_t);
+
+            K = P_pred_aug(:, :, t) * L' * Hinv;
             Fhat_filt_aug(t, :) = Fhat_pred_aug(t, :) + (K * v_t)';
-            P_filt_aug(:, :, t) = P_pred_aug(:, :, t) - K * H * ...
+            P_filt_aug(:, :, t) = P_pred_aug(:, :, t) - K * L * ...
                 P_pred_aug(:, :, t);
         end
 
@@ -544,7 +554,6 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
             % sum_Ft_lagsFt_lags, which may risk singularity in small 
             % samples or noisy data.
             Ahat_t = sum_FtFt_lags / sum_Ft_lagsFt_lags;                   % R x (R*p)
-            % Enforce stability by projecting onto stable subspace
             Ahat_comp_t = zeros(state_dim, state_dim);
             Ahat_comp_t(1:R, :) = Ahat_t;
             for i = 1:p-1
@@ -554,7 +563,7 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
             max_eig = max(abs(eigvals));
             max_eigvals_iter(t) = max_eig;                                 % Store for summary
 
-            if any(abs(eigvals) > 0.99)
+            if any(abs(eigvals) >= 1)
                 % Project Ahat_t to ensure stability
                 % Explanation: If any eigenvalue exceeds 0.99 in magnitude,
                 % the companion matrix is adjusted by capping real 
@@ -598,16 +607,18 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
         % reflecting the companion form structure. The time-invariant 
         % assumption simplifies estimation but may miss temporal changes in
         % noise variance.
-        Qhat_new = zeros(R, R);
-        for t = p+1:T
-            Ahat_t = zeros(R, state_dim);
-            for lag = 1:p
-                Ahat_t(:, (lag-1)*R + 1 : lag*R) = Ahat{t, lag};
-            end
-            resid = xitT(t, 1:R)' - Ahat_t * xitT(t-1, 1:state_dim)';      % R x 1
-            Qhat_new = Qhat_new + resid * resid';
+        EF = zeros(R, R);
+        EF1 = zeros(R, state_dim);
+        for t = 2:T
+            Ft = xitT(t, 1:R)';                                            % Smoothed factors
+            Ft_lags = xitT(t-1, 1:state_dim)';                             % Lagged states
+            PtT_t = P_smooth_aug(1:R, 1:R, t);                             % Smoothed covariance
+            PtT_cross = P_smooth_aug(1:R, 1:state_dim, t);                 % Cross-covariance
+            EF = EF + Ft * Ft' + PtT_t;
+            EF1 = EF1 + Ft * Ft_lags' + PtT_cross;
         end
-        Qhat(1:R, 1:R) = Qhat_new / (T - p);
+        Qhat_new = (EF - Ahat_t(1:R, 1:state_dim) * EF1') / (T - 1);       % Use last Ahat_t or adjust as needed
+        Qhat(1:R, 1:R) = (Qhat_new + Qhat_new') / 2;
 
         % --- Update Sigma_e_hat ---
         % Purpose: Estimate idiosyncratic noise covariance Sigma_e_hat.
@@ -616,11 +627,13 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
         % reduce parameters and ensure identifiability in the factor model.
         % This assumption aligns with standard practice in large-scale 
         % factor models to manage computational complexity.
+        % Sigma_e_hat = sum(eta_t * eta_t' + Lambda_t * P_t * Lambda_t') / T
         Sigma_e_new = zeros(N, N);
         for t = 1:T
             Lt = squeeze(Lhat(:, :, t));
             resid = X(t, :)' - Lt * xitT(t, 1:R)';
-            Sigma_e_new = Sigma_e_new + resid * resid';
+            PtT_t = P_smooth_aug(1:R, 1:R, t);                           % Covariance of factors at t
+            Sigma_e_new = Sigma_e_new + resid * resid'+ Lt * PtT_t * Lt';
         end
         Sigma_e_hat = diag(diag(Sigma_e_new / T));
 
@@ -632,16 +645,32 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
         % convergence checking. This criterion is standard in EM algorithms
         % for monitoring likelihood improvement.
         if iter > 1
-            rel_change = abs(logL - logL_prev) / (abs(logL) + abs(logL_prev) ...
-                + 1e-3) / 2;
-            fprintf('Iteration %d: logL = %.4f, rel_change = %.4e\n', iter, ...
-                logL, rel_change);
+            % did it decrease this iteration?
+                if logL < logL_prev
+                    decrease_count = decrease_count + 1;
+                    fprintf('Iteration %d: logL Decreased (count = %d)\n', iter, ...
+                        decrease_count);
+                    if decrease_count == 2
+                        fprintf(['Log-likelihood Decreased twice: stopping at ' ...
+                            'iter %d\n'], iter);
+                        break;
+                    end
+                end
+        
+            % check normal convergence criterion
+            rel_change = abs(logL - logL_prev) / (abs(logL) + abs ...
+                (logL_prev) + 1e-3) / 2;
+            fprintf('Iteration %d: logL = %.4f, rel_change = %.4e\n', ...
+                iter, logL, rel_change);
             if rel_change < tol
-                fprintf('Converged at iteration %d\n', iter);
+                fprintf('Converged at iteration %d (rel_change < tol)\n', ...
+                    iter);
                 break;
             end
         end
-        logL_prev = logL;
+    
+    % update for next iter
+    logL_prev = logL;
     end
 
     % --- Common Components ---
@@ -671,27 +700,6 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
         Ahat_companion(R*i+1:R*(i+1), R*(i-1)+1:R*i) = eye(R);
     end
 
-    % --- Compute Rhat (Prediction Error Covariance) ---
-    % Purpose: Estimate the covariance of prediction errors.
-    % Explanation: Rhat includes both idiosyncratic errors and uncertainty
-    % from factor estimates, computed as:
-    %   Rhat = sum(eta_t * eta_t' + Lambda_t * P_t * Lambda_t') / (T-cc)
-    % where eta_t = X_t - Lambda_t * f_t, and P_t is the smoothed factor 
-    % covariance. The choice of cc=0 is unusual and may assume all 
-    % observations are used; typically, cc=p to account for initial lags, 
-    % which may warrant adjustment for consistency.
-    yy = X';                                                               % N x T
-    xx = xitT(:, 1:R)';                                                    % R x T (factors only)
-    Rhat = zeros(N, N);
-    cc = 0;                                                                % Assuming cc = p, adjust if different
-    for tt = cc+1:T
-        Lt = squeeze(Lhat(:, :, tt));                                      % N x R
-        eta = yy(:, tt) - Lt * xx(:, tt);                                  % N x 1
-        PtT_tt = P_smooth_aug(1:R, 1:R, tt);                               % Covariance of factors at t
-        Rhat = Rhat + eta * eta' + Lt * PtT_tt * Lt';
-    end
-    Rhat = diag(diag(Rhat / (T - cc)));                                    % Enforce diagonal structure
-
     % --- Set PtT ---
     % Purpose: Store the smoothed state covariances for output.
     % Explanation: PtT contains the smoothed covariances P_{t|T} for the
@@ -700,6 +708,13 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
     PtT = P_smooth_aug;                                                    % (R*(p+1)) x (R*(p+1)) x T
     logL = logL_prev;
 
+    % --- Residuals ---%
+    resid = zeros(T, N);
+    for t = 1:T
+        Lt = squeeze(Lhat(:, :, t));
+        resid = X(t, :)' - Lt * xitT(t, 1:R)';
+    end
+
     % --- Results ---
     % Purpose: Organize outputs into a struct for convenient access.
     % Explanation: The MKA struct consolidates all model estimates and 
@@ -707,7 +722,7 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
     % covariances, log-likelihood, and eigenvalues of Ahat companion 
     % matrices. This structure facilitates further analysis, forecasting, 
     % or reporting, aligning with standard practices in econometric modeling.
-    MKA.CChat=CChat;
+    MKA.CChat=mean_train+CChat.*std_train;
     MKA.Fhat=Fhat;
     MKA.xitT=xitT; 
     MKA.Lhat=Lhat; 
@@ -716,9 +731,9 @@ function [MKA] = QMLDFM_TVLA(X, R, h, p, max_iter, tol, h_A)
     MKA.Ahat_companion=Ahat_companion; 
     MKA.Qhat=Qhat; 
     MKA.logL=logL;
-    MKA.Rhat=Rhat;
     MKA.PtT=PtT;
     MKA.eigvals_Ahat=eigvals_Ahat;
+    MKA.Residuals=resid;
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -736,7 +751,7 @@ end
 %   - Dahlhaus, R. (1996)
 %   - Motta G, Hafner CM, von Sachs R. (2011)
 
-function [CChat, Fhat, Lhat, Sigmahat] = lsfm(X, R, h)
+function [CChat, Fhat, Lhat, Sigma_e_hat] = lsfm(X, R, h)
 % Mathematical Formulation:
 % For each t, compute a local covariance matrix:
 % Sigma_t = sum(w_{t,s} * X_s * X_s'),  w_{t,s} = K((u_s - u_t)/h) / sum(K)
@@ -802,6 +817,12 @@ function [CChat, Fhat, Lhat, Sigmahat] = lsfm(X, R, h)
         % Adjust sign of eigenvectors for consistency
         sign_adjust = diag(sign(A(1,:)));
         A_adjusted = A * sign_adjust;
+
+        E = X - squeeze( sum( Lhat .* reshape(Fhat',1,R,T), 2 ) )';        % T×N residuals
+
+        % estimate idiosyncratic variances directly
+        sigma_e_vec = mean( E.^2, 1 )';                                    % N×1 vector of idio variances
+        Sigma_e_hat = diag( sigma_e_vec );
         
         % Initialize loadings and factors per user's request
         Lhat(:,:,t) = A_adjusted .* sqrt_eigenvalues';                     % Lhat = A * sqrt(D), scaling each column

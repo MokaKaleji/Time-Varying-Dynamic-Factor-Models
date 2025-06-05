@@ -23,9 +23,9 @@ clear; close all; clc;
 %   1. Dataset selection and loading
 %   2. Training sample size specification
 %   3. Data standardization
-%   4. Model estimation using DFTLA.m
+%   4. Model estimation using QMLDFM_TVLA.m
 % Dependencies:
-%   - DFTLA.m
+%   - QMLDFM_TVLA.m
 %   - lsfm.m
 %   - MK_VAR.m
 %   - MK_ols.m

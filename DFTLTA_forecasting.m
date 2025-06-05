@@ -2,12 +2,12 @@
 % Author: Moka Kaleji • Contact: mohammadkaleji1998@gmail.com
 % Affiliation: Master Thesis in Econometrics: 
 % Advancing High-Dimensional Factor Models: Integrating Time-Varying 
-% Loadings and Transition Matrix with Dynamic Factors.
+% Parameters with Dynamic Factors.
 % University of Bologna
 
 % Purpose: Perform out-of-sample forecasting using a dynamic factor model 
-% with time-varying loadings (DFTL), evaluate forecast accuracy, and 
-% visualize results.
+% with time-varying loadings and transition matrix A (DFTLTA), evaluate 
+% forecast accuracy, and visualize results.
 % Explanation: This script loads estimation outputs from QMLDFM_TVLA, generates
 % forecasts for a user-specified horizon H, computes error metrics (MSFE, RMSE), 
 % compares against benchmarks (random walk, AR(1)), conducts statistical 
@@ -34,7 +34,7 @@ clear; close all; clc;
 % corresponding data.
 % Explanation: Presents a dialog for selecting between monthly (MD1959.xlsx)
 % or quarterly (QD1959.xlsx) datasets, loads the chosen data, and defines 
-% key variables (GDP, Unemployment, Inflation, 1-Year Treasury - 3-Month Treasury)
+% key variables (GDP, Unemployment, Inflation)
 % for forecasting evaluation. The datasets are high-dimensional time series
 % used in macroeconomic forecasting, with specific indices for key variables.
 % References:
@@ -63,24 +63,24 @@ switch choiceIndex
         T = 790;
         tableData = readtable(filepath);
         x = table2array(tableData);
-        key_vars = [1, 24, 105, 89];                                       % Indices for key variables
+        key_vars = [1, 24, 105];                                       % Indices for key variables
     case 2
         filepath = ['/Users/moka/Research/Thesis/Live Project/' ...
             'Processed_Data/QD1959.xlsx'];
         T = 264;
         tableData = readtable(filepath);
         x = table2array(tableData(:,2:end));                               % Exclude ate column
-        key_vars = [1, 58, 116, 147];                                      % Indices for key variables
+        key_vars = [1, 58, 116];                                      % Indices for key variables
     otherwise
         error('Unexpected selection index.');
 end
-var_names = {'GDP', 'Unemployment', 'Inflation', '1_Y Treasury - 3_M Treasury'};
+var_names = {'GDP', 'Unemployment', 'Inflation'};
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Load DFTLTA Estimation Outputs 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Purpose: Load pre-estimated DFTL model parameters and results.
+% Purpose: Load pre-estimated DFTLTA model parameters and results.
 % Explanation: Loads the output file 'dftl_estim_results.mat' containing 
 % the MKA struct (from QMLDFM_TVLA), training data statistics (mean_train, 
 % std_train, T_train), and model parameters (R, h, p, max_iter, tol). 
@@ -252,9 +252,9 @@ for k = 1:length(key_vars)
     p_a1      = 2*(1 - tcdf(abs(t_a1), dfree));
 
     fprintf('\nEncompassing tests for %s:\n', var_names{k});
-    fprintf(' DFTL vs RW:  \tβ̂=%.3f, t=%.2f, p=%.3f\n', beta_rw(2), t_rw, ...
+    fprintf(' DFTLTA vs RW:  \tβ̂=%.3f, t=%.2f, p=%.3f\n', beta_rw(2), t_rw, ...
         p_rw);
-    fprintf(' DFTL vs AR1: \tβ̂=%.3f, t=%.2f, p=%.3f\n', beta_a1(2), t_a1, ...
+    fprintf(' DFTLTA vs AR1: \tβ̂=%.3f, t=%.2f, p=%.3f\n', beta_a1(2), t_a1, ...
         p_a1);
 end
 
@@ -264,7 +264,7 @@ end
 % autocorrelations up to maxLags, testing the null hypothesis of no 
 % autocorrelation against the alternative of serial correlation.
 if H > 1
-maxLags = ceil(H/3);                                                       % how many lags to test
+maxLags = 3;                                                       % how many lags to test
 alpha   = 0.05;                                                            % significance level
 
 % Compute residuals matrix (H×4)
@@ -296,10 +296,6 @@ end
 else
 end
 
-function s = ternary(cond, a, b)
-    if cond, s = a; else s = b; end
-end
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Visualization 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -321,61 +317,71 @@ disp(['Most correlated factors: ', num2str(i), ' & ', num2str(j)]);
 max_lags = 10;
 [cross_corr, lags] = xcorr(MKA.Fhat(:,i), MKA.Fhat(:,j), max_lags, 'coeff');
 
-figure('Position', [100, 100, 1400, 900]);
-
 % --- Aggregate MSFE by Horizon ---
-subplot(3,4,1);
+fig1 = figure;
 plot(1:H, MSFE_horizon, '-o', 'LineWidth', 1.5);
 title('Aggregate MSFE by Horizon'); xlabel('Horizon'); ylabel('MSFE'); 
 grid on;
+exportgraphics(fig1, 'MSFE_by_Horizon.pdf', 'ContentType', 'vector', 'Resolution', 300);
 
 % --- Actual vs. Forecast for Key Variables ---
-for idx = 1:4
-    subplot(3,4,1+idx);
+for idx = 1:3
+    fig = figure;
     plot(1:T_train, x(1:T_train, key_vars(idx)), 'b-', 'DisplayName', ...
         'Train Actual'); hold on;
-    plot(T_train+1:T_train+H, x_test(:, key_vars(idx)), 'k-', ...
-        'DisplayName', 'Test Actual');
-    plot(T_train+1:T_train+H, MKA_Forecast.yhat(:, key_vars(idx)), 'r--', ...
+    plot(1:T_train, MKA.CChat(1:T_train, key_vars(idx)), 'r--', 'DisplayName', ...
+        'Estimate'); hold on;
+    plot(T_train+1:T_train+H, x_test(:, key_vars(idx)), 'k-', 'DisplayName', ...
+        'Test Actual');
+    plot(T_train+1:T_train+H, MKA_Forecast.yhat(:, key_vars(idx)), 'g-', ...
         'DisplayName', 'Forecast');
     hold off; title(var_names{idx});
     xlabel('Time'); ylabel('Value'); grid on;
-    if idx==1, legend('Location', 'Best'); end
+    % Formatting
+    title(var_names{idx});
+    xlabel('Time'); ylabel('Value'); grid on;
+    legend('Location', 'Best');
+
+    % Save the figure as high-res PDF
+    filename = sprintf('Forecast_Var_%s.pdf', var_names{idx});
+    exportgraphics(fig, filename, 'ContentType', 'vector', 'Resolution', 300);
+
+    % Close the figure to avoid clutter
+    close(fig);
 end
 
 % --- Histogram of MSFE ---
-subplot(3,4,6);
+fig6 = figure;
 histogram(MSFE_all, 10);
 title('MSFE Distribution'); xlabel('MSFE'); ylabel('Frequency'); grid on;
 
 % --- Time Series of Factors ---
-subplot(3,4,7);
+fig7 = figure;
 plot(MKA.Fhat, 'LineWidth', 1.5);
 title('Estimated Factors over Time'); xlabel('Time'); ylabel('Value');
 legend(arrayfun(@(k)['Factor ' num2str(k)], 1:size(MKA.Fhat,2), ...
     'UniformOutput', false), 'Location', 'Best'); grid on;
 
 % --- Cross-Correlogram of Most Correlated Factors ---
-subplot(3,4,8);
+fig8 = figure;
 stem(lags, cross_corr, 'LineWidth', 1.5);
 title(['Cross-Correlogram: Factor ' num2str(i) ' vs ' num2str(j)]);
 xlabel('Lag'); ylabel('Corr'); grid on;
 
 % --- MSFE Ratio Bar Chart ---
-subplot(3,4,9);
+fig2 = figure;
 bar([MSFE_ratio_rw; MSFE_ratio_ar1]');
-title('MSFE Ratios: DFTL vs RW and AR(1)');
+title('MSFE Ratios: DFTLTA vs RW and AR(1)');
 xticklabels(var_names); ylabel('Ratio');
-legend('DFTL / RW', 'DFTL / AR(1)', 'Location', 'Best'); grid on;
+legend('DFTLTA / RW', 'DFTLTA / AR(1)', 'Location', 'Best'); grid on;
 
-sgtitle(sprintf('DFTL Forecasting Performance: p=%d', p));
+exportgraphics(fig2, 'MSFE Ratio.pdf', 'ContentType', 'vector', 'Resolution', 300);
 
 % --- MSFE per Horizon for Key Variables ---
-subplot(3,4,10);
+fig9 = figure;
 plot(1:H, squared_errors(:,1), '-o', 'LineWidth', 1.3); hold on;
 plot(1:H, squared_errors(:,2), '-s', 'LineWidth', 1.3);
 plot(1:H, squared_errors(:,3), '-d', 'LineWidth', 1.3);
-plot(1:H, squared_errors(:,4), '-^', 'LineWidth', 1.3);
 hold off;
 title('MSFE per Horizon for Key Variables');
 xlabel('Horizon'); ylabel('Squared Error');
@@ -487,64 +493,44 @@ function [MKA_Forecast] = DFTLTA_Forecast(xitT, Ahat, Lhat, Sigma_e_hat, ...
     % of Qhat’s R x R block and Sigma_e_hat to generate random innovations.
     % Adds small diagonal terms if matrices are not positive definite, 
     % ensuring numerical stability.
+if stochastic
+    % Extract R x R block from Qhat directly (no Cholesky)
+    Qhat_R = Qhat(1:R, 1:R);                                           % R x R non-zero block
+
+    % Use Sigma_e_hat as-is for idiosyncratic noise
+    % (assumed to be positive definite or as estimated)
+else
+    Qhat_R       = zeros(R, R);                                       % No factor noise
+    Sigma_e_hat  = zeros(N, N);                                       % No idiosyncratic noise
+end
+
+% --- Forecast Loop ---
+% Purpose: Generate H-step-ahead forecasts for factors and observables.
+% Explanation: Iteratively applies the VAR companion matrix Ahat to 
+% forecast factors: state_{t+h} = Ahat * state_{t+h-1} Optionally adds
+% stochastic noise u_t ~ N(0, Qhat_R). Observables are computed as 
+% X_{t+h} = Lt * f_{t+h} + e_t, with optional noise e_t ~ N(0, Sigma_e_hat).
+for h = 1:H
+    % Predict next state deterministically
+    state = Ahat * state;                                              % state_dim x 1
+
     if stochastic
-        % Extract R x R block from Qhat
-        Qhat_R = Qhat(1:R, 1:R);                                           % R x R non-zero block
-        try
-            Qhat_chol = chol(Qhat_R, 'lower');
-        catch
-            warning(['Qhat(1:R, 1:R) is not positive definite. Adding ' ...
-                'small diagonal term.']);
-            epsilon = 1e-6 * trace(Qhat_R) / R;
-            Qhat_R = Qhat_R + epsilon * eye(R);
-            try
-                Qhat_chol = chol(Qhat_R, 'lower');
-            catch
-                warning(['Qhat(1:R, 1:R) still not positive definite. ' ...
-                    'Disabling factor noise.']);
-                Qhat_chol = zeros(R, R);                                   % No factor noise
-            end
-        end
-
-        % Ensure Sigma_e_hat is positive definite
-        try
-            Sigma_e_hat_chol = chol(Sigma_e_hat, 'lower');
-        catch
-            warning(['Sigma_e_hat is not positive definite. Adding ' ...
-                'small diagonal term.']);
-            epsilon = 1e-6 * trace(Sigma_e_hat) / N;
-            Sigma_e_hat = Sigma_e_hat + epsilon * eye(N);
-            Sigma_e_hat_chol = chol(Sigma_e_hat, 'lower');
-        end
-    else
-        Qhat_chol = zeros(R, R); % No noise for deterministic
-        Sigma_e_hat_chol = zeros(N, N);
+        % Add factor innovation noise (only to first R components)
+        innov = Qhat_R * randn(R, 1);
+        state(1:R) = state(1:R) + innov;
     end
 
-    % --- Forecast Loop ---
-    % Purpose: Generate H-step-ahead forecasts for factors and observables.
-    % Explanation: Iteratively applies the VAR companion matrix Ahat to 
-    % forecast factors: state_{t+h} = Ahat * state_{t+h-1} Optionally adds
-    % stochastic noise u_t ~ N(0, Qhat_R). Observables are computed as 
-    % X_{t+h} = Lambda_T * f_{t+h} + e_t, with optional noise e_t ~ N(0, Sigma_e_hat).
-    for h = 1:H
-        % Update state
-        state = Ahat * state;                                              % state_dim x 1
-        if stochastic
-            % Add factor innovation noise (only to first R components)
-            innov = Qhat_chol * randn(R, 1);
-            state(1:R) = state(1:R) + innov;
-        end
-        Fhat_forecast(h, :) = state(1:R)';                                 % R x 1
+    % Store factor forecast
+    Fhat_forecast(h, :) = state(1:R)';                                 % R x 1
 
-        % Map to observables
-        X_forecast(h, :) = (Lt * Fhat_forecast(h, :)')';
-        if stochastic
-            % Add idiosyncratic noise
-            X_forecast(h, :) = X_forecast(h, :) + (Sigma_e_hat_chol ...
-                * randn(N, 1))';
-        end
+    % Map to observables
+    X_forecast(h, :) = (Lt * Fhat_forecast(h, :)')';
+
+    if stochastic
+        % Add idiosyncratic noise
+        X_forecast(h, :) = X_forecast(h, :) + (Sigma_e_hat * randn(N, 1))';
     end
+end
     % --- Results ---
     % Purpose: Transform forecasts to original scale and organize outputs.
     % Explanation: Converts normalized forecasts (X_forecast) to the 
